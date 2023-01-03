@@ -3,7 +3,7 @@ assert() {
   expected="$1"
   input="$2"
 
-  ./small-cc "$input" > tmp.s
+  cargo run -- "$input" > tmp.s
   cc -o tmp tmp.s
   ./tmp
   actual="$?"
