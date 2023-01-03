@@ -77,12 +77,23 @@ fn tokenize(expression: String) -> Token {
     for c in expression.chars() {
         if c.is_ascii_digit() {
            number.push(c); 
-        } else {
+        } else if "+-/*".contains(c) {
             let (_, last) = expression.split_at(number.len());
+            if last.len() == 1 {
+                eprintln!("式が演算子で終了しています");
+                process::exit(1);
+            }
+            if "+-/*".contains(last.chars().nth(1).unwrap()) {
+                eprintln!("数値が期待される箇所に演算子が存在しています");
+                process::exit(1);
+            }
             return Token::Operand {
                 number: number.parse::<i32>().unwrap(),
                 next: Box::new(tokenize(last.to_string())),
             }
+        } else {
+            eprintln!("トークナイズできない文字が存在します");
+            process::exit(1);
         }
     }
     
