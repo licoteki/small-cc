@@ -58,13 +58,29 @@ fn print_token(t: Token) -> Token{
 }
 
 fn lex(expression: String) -> String {
+    if "+-*/".contains(expression.chars().nth(0).unwrap()) {
+        eprintln!("{}\n{}式が演算子で開始されています", expression, "^");
+        process::exit(1);
+    }
+    if "+-*/".contains(expression.chars().nth(expression.len() - 1).unwrap()) {
+        eprintln!("{}\n{}{}式が演算子で終了しています", expression, " ".repeat(expression.len() - 1), "^");
+        process::exit(1);
+    }
+    for (i, c) in expression.chars().enumerate() {
+        match "0123456789+-*/ ".contains(c) {
+            false => {
+                eprintln!("{}\n{}{}トークナイズできない文字が存在します。", expression, " ".repeat(i), "^");
+                process::exit(1);
+            },
+            _ => (),
+        }
+    }
     expression.replace(" ", "")
 }
 
 fn tokenize(expression: String) -> Token {
     if expression.len() == 0 { return Token::End; }
     let (first, last) = expression.split_at(1);
-    if first == " " { return tokenize(last.to_string()) };
     
     if "+-/*".contains(first) {
         return Token::Operator {
@@ -74,27 +90,20 @@ fn tokenize(expression: String) -> Token {
     }
     
     let mut number: String = "".to_string();
-    for c in expression.chars() {
-        if c.is_ascii_digit() {
-           number.push(c); 
-        } else if "+-/*".contains(c) {
+    
+    for (i, c) in expression.chars().enumerate() {
+        if "+-/*".contains(c) {
             let (_, last) = expression.split_at(number.len());
-            if last.len() == 1 {
-                eprintln!("式が演算子で終了しています");
-                process::exit(1);
-            }
             if "+-/*".contains(last.chars().nth(1).unwrap()) {
-                eprintln!("数値が期待される箇所に演算子が存在しています");
+                eprintln!("{}\n{}{}演算子が連続しています", expression, " ".repeat(i + 1), "^");
                 process::exit(1);
             }
             return Token::Operand {
                 number: number.parse::<i32>().unwrap(),
                 next: Box::new(tokenize(last.to_string())),
             }
-        } else {
-            eprintln!("トークナイズできない文字が存在します");
-            process::exit(1);
         }
+        number.push(c); 
     }
     
     return Token::Operand {
