@@ -1,116 +1,237 @@
-use std::env;
 use std::process;
+use std::env;
 use std::fmt;
 
-enum Token {
-    Operator {
-        character: char,
-        next: Box<Token>,
-    },
-    Operand {
-        number: i32,
-        next: Box<Token>,
-    },
+#[derive(Debug, Clone)]
+enum TokenKind {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    OpenParentheses,
+    CloseParentheses,
+    Number(i32),
+}
+
+impl fmt::Display for TokenKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            TokenKind::Add => write!(f, "  add rax, "),
+            TokenKind::Sub => write!(f, "  sub rax, "),
+            TokenKind::Number(n) => write!(f, "{}\n", n),
+            _ => Ok(()),
+        }
+    }
+}
+
+#[derive(PartialEq)]
+enum State {
+    Start,
+    S1, // expect number || '('
+    S2, // expect operator || ')'
     End,
 }
 
-impl Token {
-    pub fn map<F: Copy + FnMut(Token) -> Token>(self, mut f:F) -> Token {
-        match self {
-            Token::Operator { character, next } => {
-                Token::Operator { character: character, next: Box::new(f(*next)) }
-            },
-            Token::Operand { number, next } => {
-                Token::Operand { number: number, next: Box::new(f(*next)) }
-            },
-            Token::End => Token::End,
+#[derive(Debug, Clone)]
+enum TokenLinkedList<TokenKind> {
+    Empty,
+    NonEmpty {
+        element: TokenKind,
+        next: Box<TokenLinkedList<TokenKind>>,
+    },
+}
+
+struct TokenLinkedListIterator<'a, TokenKind: 'a> {
+    unvisited: Vec<&'a TokenKind>
+}
+
+impl<'a, TokenKind: 'a> TokenLinkedListIterator<'a, TokenKind> {
+    fn push_next(&mut self, mut token: &'a TokenLinkedList<TokenKind>) {
+        while let TokenLinkedList::NonEmpty { ref element, ref next } = *token {
+            self.unvisited.push(element);
+            token = &(**next);
         }
     }
 }
 
-impl fmt::Display for Token {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Token::Operator { character, next: _ } => write!(f, "{}", character),
-            Token::Operand  { number, next: _ } => write!(f, "{}", number),
-            Token::End => write!(f, "End"),
-        }
+impl<TokenKind> TokenLinkedList<TokenKind> {
+    fn iter(&self) -> TokenLinkedListIterator<TokenKind> {
+        let mut iter = TokenLinkedListIterator { unvisited: Vec::new() };
+        iter.push_next(self);
+        iter
     }
 }
 
-fn print_token(t: Token) -> Token{
-    if let Token::End = t {
-        println!("  ret");
-        t
-    } else if let Token::Operator { character, next: _ } = t {
-        match character {
-            '+' => print!("  add rax, "),
-            '-' => print!("  sub rax, "),
-             _  => (),
-        }
-        t.map(|e| print_token(e))
-    } else if let Token::Operand { number, next: _ } = t {
-        println!("{}", number);
-        t.map(|e| print_token(e))
-    } else {
-        t.map(|e| print_token(e))
+impl<'a, TokenKind: 'a> IntoIterator for &'a TokenLinkedList<TokenKind> {
+    type Item = &'a TokenKind;
+    type IntoIter = TokenLinkedListIterator<'a, TokenKind>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
-fn lex(expression: String) -> String {
-    if "+-*/".contains(expression.chars().nth(0).unwrap()) {
-        eprintln!("{}\n{}式が演算子で開始されています", expression, "^");
-        process::exit(1);
-    }
-    if "+-*/".contains(expression.chars().nth(expression.len() - 1).unwrap()) {
-        eprintln!("{}\n{}{}式が演算子で終了しています", expression, " ".repeat(expression.len() - 1), "^");
-        process::exit(1);
-    }
-    for (i, c) in expression.chars().enumerate() {
-        match "0123456789+-*/ ".contains(c) {
-            false => {
-                eprintln!("{}\n{}{}トークナイズできない文字が存在します。", expression, " ".repeat(i), "^");
+impl<'a, TokenKind> Iterator for TokenLinkedListIterator<'a, TokenKind> {
+    type Item = &'a TokenKind;
+
+    fn next(&mut self) -> Option<&'a TokenKind> {
+        self.unvisited.reverse();
+        let next = self.unvisited.pop();
+        self.unvisited.reverse();
+        next
+    } 
+}
+
+impl TokenLinkedList<TokenKind> {
+    fn tokenize(s: String, state: State, nest_count: i32) -> TokenLinkedList<TokenKind> {
+        if s.len() == 0 {
+            if nest_count != 0 { 
+                eprintln!("'('と')'の数が一致しません");
                 process::exit(1);
+            }
+            return TokenLinkedList::Empty;
+        }
+
+        let (first, last) = s.split_at(1);
+
+        match first {
+            "(" => {
+                if state != State::S1 && state != State::Start {
+                    eprintln!("'('の位置が不正です");
+                    process::exit(1);
+                }
+                return TokenLinkedList::NonEmpty {
+                    element: TokenKind::OpenParentheses,
+                    next: Box::new(TokenLinkedList::tokenize(last.to_string(), State::S1, nest_count+1)),
+                }
+            },
+            ")" => {
+                if state != State::S2 && state != State::End {
+                    eprintln!("')'の位置が不正です");
+                    process::exit(1);
+                }
+                return TokenLinkedList::NonEmpty {
+                    element: TokenKind::CloseParentheses,
+                    next: Box::new(TokenLinkedList::tokenize(last.to_string(), State::S2, nest_count-1)),
+                }
+            },
+            "+" => {
+                if state != State::S2 {
+                    eprintln!("'+'の位置が不正です");
+                    process::exit(1);
+                }
+                return TokenLinkedList::NonEmpty {
+                    element: TokenKind::Add,
+                    next: Box::new(TokenLinkedList::tokenize(last.to_string(), State::S1, nest_count)),
+                }
+            },
+            "-" => {
+                if state != State::S2 {
+                    eprintln!("'-'の位置が不正です");
+                    process::exit(1);
+                }
+                return TokenLinkedList::NonEmpty {
+                    element: TokenKind::Sub,
+                    next: Box::new(TokenLinkedList::tokenize(last.to_string(), State::S1, nest_count)),
+                }
+            },
+            "*" => {
+                if state != State::S2 {
+                    eprintln!("'*'の位置が不正です");
+                    process::exit(1);
+                }
+                return TokenLinkedList::NonEmpty {
+                    element: TokenKind::Mul,
+                    next: Box::new(TokenLinkedList::tokenize(last.to_string(), State::S1, nest_count)),
+                }
+            },
+            "/" => {
+                if state != State::S2 {
+                    eprintln!("'/'の位置が不正です");
+                    process::exit(1);
+                }
+                return TokenLinkedList::NonEmpty {
+                    element: TokenKind::Div,
+                    next: Box::new(TokenLinkedList::tokenize(last.to_string(), State::S1, nest_count)),
+                }
             },
             _ => (),
         }
+
+        for (i, c) in s.chars().enumerate() {
+            if c.to_string().parse::<i32>().is_ok() && s.len() == i + 1 {
+                return TokenLinkedList::NonEmpty {
+                    element: TokenKind::Number(s.parse::<i32>().unwrap()),
+                    next: Box::new(TokenLinkedList::tokenize("".to_string(), State::S2, nest_count)),
+                }                
+            } else if c.to_string().parse::<i32>().is_err() {
+                return TokenLinkedList::NonEmpty {
+                    element: TokenKind::Number(s[0..i].parse::<i32>().unwrap()),
+                    next: Box::new(TokenLinkedList::tokenize(s[i..].to_string(), State::S2, nest_count)),
+                }
+            }; 
+        }
+        return TokenLinkedList::Empty;
     }
-    expression.replace(" ", "")
+
 }
 
-fn tokenize(expression: String) -> Token {
-    if expression.len() == 0 { return Token::End; }
-    let (first, last) = expression.split_at(1);
-    
-    if "+-/*".contains(first) {
-        return Token::Operator {
-            character: first.chars().nth(0).unwrap(),
-            next: Box::new(tokenize(last.to_string())),
-        }
+enum NodeKind {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Num(i32),
+    End,
+}
+
+struct Node {
+    node_kind: NodeKind,
+    lhs_rhs: Option<Box<(Node, Node)>>,
+}
+
+impl Node {
+    fn new(node_kind: NodeKind, lhs_rhs: Option<Box<(Node, Node)>>) -> Node {
+        Node {
+            node_kind: node_kind,
+            lhs_rhs: lhs_rhs,
+        } 
     }
-    
-    let mut number: String = "".to_string();
-    
-    for (i, c) in expression.chars().enumerate() {
-        if "+-/*".contains(c) {
-            let (_, last) = expression.split_at(number.len());
-            if "+-/*".contains(last.chars().nth(1).unwrap()) {
-                eprintln!("{}\n{}{}演算子が連続しています", expression, " ".repeat(i + 1), "^");
-                process::exit(1);
-            }
-            return Token::Operand {
-                number: number.parse::<i32>().unwrap(),
-                next: Box::new(tokenize(last.to_string())),
-            }
-        }
-        number.push(c); 
-    }
-    
-    return Token::Operand {
-        number: number.parse::<i32>().unwrap(),
-        next: Box::new(Token::End),
+
+//    fn expr(t: Token) -> Node {
+//        let node = mul(t);
+//        match t {
+//            Token::Next { token_kind, next } => {
+//                match token_kind {
+//                    TokenKind::Add => {
+//                        return Node::new(NodeKind::Add, Some(Box::new((node, mul(*next)))));
+//                    },
+//                    TokenKind::Sub => {
+//                        return Node::new(NodeKind::Sub, Some(Box::new((node, mul(*next)))));
+//                    },
+//                    _ => return node,
+//                }
+//            },
+//            _ => return Node::new(NodeKind::End, None),
+//        }
+//
+//    }
+}
+
+fn print_token(t: TokenLinkedList<TokenKind>) -> TokenLinkedList<TokenKind> {
+    match t {
+        TokenLinkedList::Empty => {
+            println!("  ret");
+            return TokenLinkedList::Empty;
+        },
+        TokenLinkedList::NonEmpty { ref element, next } => {
+            print!("{}", element);
+            return print_token(*next)
+        },
     }
 }
+
+
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -120,8 +241,7 @@ fn main() {
         process::exit(1);
     }
     let expression = args[1].clone();
-    let lexed = lex(expression);
-    let token = tokenize(lexed);
+    let token = TokenLinkedList::tokenize(expression, State::Start, 0);
 
     println!(".intel_syntax noprefix");
     println!(".globl main");
