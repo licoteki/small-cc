@@ -1,7 +1,7 @@
-use std::process;
 use std::fmt;
+use std::process;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     Add,
     Sub,
@@ -9,7 +9,7 @@ pub enum TokenKind {
     Div,
     OpenParentheses,
     CloseParentheses,
-    Number(i32),
+    Number(u32),
 }
 
 impl fmt::Display for TokenKind {
@@ -41,12 +41,16 @@ pub enum TokenLinkedList<TokenKind> {
 }
 
 pub struct TokenLinkedListIterator<'a, TokenKind: 'a> {
-    unvisited: Vec<&'a TokenKind>
+    unvisited: Vec<&'a TokenKind>,
 }
 
 impl<'a, TokenKind: 'a> TokenLinkedListIterator<'a, TokenKind> {
     fn push_next(&mut self, mut token: &'a TokenLinkedList<TokenKind>) {
-        while let TokenLinkedList::NonEmpty { ref element, ref next } = *token {
+        while let TokenLinkedList::NonEmpty {
+            ref element,
+            ref next,
+        } = *token
+        {
             self.unvisited.push(element);
             token = &(**next);
         }
@@ -55,9 +59,19 @@ impl<'a, TokenKind: 'a> TokenLinkedListIterator<'a, TokenKind> {
 
 impl<TokenKind> TokenLinkedList<TokenKind> {
     fn iter(&self) -> TokenLinkedListIterator<TokenKind> {
-        let mut iter = TokenLinkedListIterator { unvisited: Vec::new() };
+        let mut iter = TokenLinkedListIterator {
+            unvisited: Vec::new(),
+        };
         iter.push_next(self);
         iter
+    }
+
+    pub fn next(&self) -> Option<&Self> {
+        let next = match self {
+            TokenLinkedList::Empty => None,
+            TokenLinkedList::NonEmpty { element: _, next } => Some(&**next),
+        };
+        next
     }
 }
 
@@ -86,13 +100,13 @@ impl TokenLinkedList<TokenKind> {
         Self::tokenize(s, State::Start, 0)
     }
 
-    fn tokenize(s: String, state: State, nest_count: i32) -> Self {
+    fn tokenize(s: String, state: State, nest_count: u32) -> Self {
         if s.len() == 0 {
             if nest_count != 0 {
                 eprintln!("'('と')'の数が一致しません");
                 process::exit(1);
             }
-            
+
             return TokenLinkedList::Empty;
         }
 
@@ -111,9 +125,13 @@ impl TokenLinkedList<TokenKind> {
                 }
                 return TokenLinkedList::NonEmpty {
                     element: TokenKind::OpenParentheses,
-                    next: Box::new(TokenLinkedList::tokenize(last.to_string(), State::S1, nest_count+1)),
-                }
-            },
+                    next: Box::new(TokenLinkedList::tokenize(
+                        last.to_string(),
+                        State::S1,
+                        nest_count + 1,
+                    )),
+                };
+            }
             ")" => {
                 if state != State::S2 && state != State::End {
                     eprintln!("')'の位置が不正です");
@@ -121,9 +139,13 @@ impl TokenLinkedList<TokenKind> {
                 }
                 return TokenLinkedList::NonEmpty {
                     element: TokenKind::CloseParentheses,
-                    next: Box::new(TokenLinkedList::tokenize(last.to_string(), State::S2, nest_count-1)),
-                }
-            },
+                    next: Box::new(TokenLinkedList::tokenize(
+                        last.to_string(),
+                        State::S2,
+                        nest_count - 1,
+                    )),
+                };
+            }
             "+" => {
                 if state != State::S2 {
                     eprintln!("'+'の位置が不正です");
@@ -131,9 +153,13 @@ impl TokenLinkedList<TokenKind> {
                 }
                 return TokenLinkedList::NonEmpty {
                     element: TokenKind::Add,
-                    next: Box::new(TokenLinkedList::tokenize(last.to_string(), State::S1, nest_count)),
-                }
-            },
+                    next: Box::new(TokenLinkedList::tokenize(
+                        last.to_string(),
+                        State::S1,
+                        nest_count,
+                    )),
+                };
+            }
             "-" => {
                 if state != State::S2 {
                     eprintln!("'-'の位置が不正です");
@@ -141,9 +167,13 @@ impl TokenLinkedList<TokenKind> {
                 }
                 return TokenLinkedList::NonEmpty {
                     element: TokenKind::Sub,
-                    next: Box::new(TokenLinkedList::tokenize(last.to_string(), State::S1, nest_count)),
-                }
-            },
+                    next: Box::new(TokenLinkedList::tokenize(
+                        last.to_string(),
+                        State::S1,
+                        nest_count,
+                    )),
+                };
+            }
             "*" => {
                 if state != State::S2 {
                     eprintln!("'*'の位置が不正です");
@@ -151,9 +181,13 @@ impl TokenLinkedList<TokenKind> {
                 }
                 return TokenLinkedList::NonEmpty {
                     element: TokenKind::Mul,
-                    next: Box::new(TokenLinkedList::tokenize(last.to_string(), State::S1, nest_count)),
-                }
-            },
+                    next: Box::new(TokenLinkedList::tokenize(
+                        last.to_string(),
+                        State::S1,
+                        nest_count,
+                    )),
+                };
+            }
             "/" => {
                 if state != State::S2 {
                     eprintln!("'/'の位置が不正です");
@@ -161,23 +195,35 @@ impl TokenLinkedList<TokenKind> {
                 }
                 return TokenLinkedList::NonEmpty {
                     element: TokenKind::Div,
-                    next: Box::new(TokenLinkedList::tokenize(last.to_string(), State::S1, nest_count)),
-                }
-            },
+                    next: Box::new(TokenLinkedList::tokenize(
+                        last.to_string(),
+                        State::S1,
+                        nest_count,
+                    )),
+                };
+            }
             _ => (),
         }
 
         for (i, c) in s.chars().enumerate() {
-            if c.to_string().parse::<i32>().is_ok() && s.len() == i + 1 {
+            if c.to_string().parse::<u32>().is_ok() && s.len() == i + 1 {
                 return TokenLinkedList::NonEmpty {
-                    element: TokenKind::Number(s.parse::<i32>().unwrap()),
-                    next: Box::new(TokenLinkedList::tokenize("".to_string(), State::S2, nest_count)),
-                }
-            } else if c.to_string().parse::<i32>().is_err() {
+                    element: TokenKind::Number(s.parse::<u32>().unwrap()),
+                    next: Box::new(TokenLinkedList::tokenize(
+                        "".to_string(),
+                        State::S2,
+                        nest_count,
+                    )),
+                };
+            } else if c.to_string().parse::<u32>().is_err() {
                 return TokenLinkedList::NonEmpty {
-                    element: TokenKind::Number(s[0..i].parse::<i32>().unwrap()),
-                    next: Box::new(TokenLinkedList::tokenize(s[i..].to_string(), State::S2, nest_count)),
-                }
+                    element: TokenKind::Number(s[0..i].parse::<u32>().unwrap()),
+                    next: Box::new(TokenLinkedList::tokenize(
+                        s[i..].to_string(),
+                        State::S2,
+                        nest_count,
+                    )),
+                };
             };
         }
         return TokenLinkedList::Empty;
@@ -187,12 +233,11 @@ impl TokenLinkedList<TokenKind> {
         match self {
             TokenLinkedList::Empty => {
                 println!("  ret");
-            },
+            }
             TokenLinkedList::NonEmpty { ref element, next } => {
                 print!("{}", element);
                 next.print_token();
-            },
+            }
         }
     }
 }
-
