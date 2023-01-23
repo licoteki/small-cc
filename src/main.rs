@@ -8,6 +8,8 @@ mod token;
 use token::State;
 use token::TokenLinkedList;
 
+use node::Node;
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -24,5 +26,11 @@ fn main() {
     print!("  mov rax, ");
 
     token.print_token();
+
+    let node = Node::expr(&token); 
+
+    println!("{:?}", node);
+    
+
     process::exit(0);
 }

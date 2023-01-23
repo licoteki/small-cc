@@ -1,7 +1,7 @@
 use crate::token::TokenLinkedList;
 use crate::token::TokenKind;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum NodeKind {
     Add,
     Sub,
@@ -10,7 +10,8 @@ enum NodeKind {
     Number(u32),
 }
 
-struct Node {
+#[derive(Debug)]
+pub struct Node {
     node_kind: NodeKind,
     lhs: Option<Box<Node>>,
     rhs: Option<Box<Node>>,
@@ -21,25 +22,39 @@ impl Node {
         Node { node_kind, lhs, rhs }
     }
 
-    fn expr(t: &TokenLinkedList<TokenKind>) -> Node {
-        unimplemented!();
+    pub fn expr(t: &TokenLinkedList<TokenKind>) -> Option<Node> {
+        let lhs = Node::mul(&t);
+        match t.next().unwrap() {
+            TokenLinkedList::NonEmpty { element, next } => {
+                match element {
+                    TokenKind::Add => {
+                        return Some(Node::new(NodeKind::Add, Some(Box::new(lhs.unwrap())), Some(Box::new(Node::mul(&*next).unwrap()))));
+                    },
+                    TokenKind::Sub => {
+                        return Some(Node::new(NodeKind::Sub, Some(Box::new(lhs.unwrap())), Some(Box::new(Node::mul(&*next).unwrap()))));
+                    },
+                    _ => lhs,
+                }
+            },
+            _ => lhs,
+        }
     }
     
-    fn mul(t: TokenLinkedList<TokenKind>) -> Option<Node> {
-        let lhs = Node::primary(&t).unwrap();
+    fn mul(t: &TokenLinkedList<TokenKind>) -> Option<Node> {
+        let lhs = Node::primary(&t);
         match t.next().unwrap() {
             TokenLinkedList::NonEmpty { element, next } => {
                 match element {
                     TokenKind::Mul => {
-                        return Some(Node::new(NodeKind::Mul, Some(Box::new(lhs)), Some(Box::new(Node::primary(&*next).unwrap()))));
+                        return Some(Node::new(NodeKind::Mul, Some(Box::new(lhs.unwrap())), Some(Box::new(Node::primary(&*next).unwrap()))));
                     },
                     TokenKind::Div => {
-                        return Some(Node::new(NodeKind::Div, Some(Box::new(lhs)), Some(Box::new(Node::primary(&*next).unwrap()))));
+                        return Some(Node::new(NodeKind::Div, Some(Box::new(lhs.unwrap())), Some(Box::new(Node::primary(&*next).unwrap()))));
                     },
-                    _ => None,
+                    _ => lhs,
                 }
             },
-            _ => None,
+            _ => lhs,
         }
     }
 
@@ -48,7 +63,7 @@ impl Node {
             TokenLinkedList::NonEmpty { element, next } => {
                 match element {
                     TokenKind::OpenParentheses => {
-                        return Some(Node::expr(&**next));
+                        return Node::expr(&**next);
                     },
                     TokenKind::Number(n) => {
                         return Some(Node::new(NodeKind::Number(*n), None, None));
