@@ -18,7 +18,7 @@ fn main() {
         process::exit(1);
     }
     let expression = args[1].clone();
-    let token = TokenLinkedList::new(expression);
+    let mut token = TokenLinkedList::from(expression).unwrap();
 
     println!(".intel_syntax noprefix");
     println!(".globl main");
@@ -27,10 +27,9 @@ fn main() {
 
     token.print_token();
 
-    let node = Node::expr(&token); 
+    let node = Node::expr(&mut token);
 
-    println!("{:?}", node);
-    
-
+    println!("{:?}", &node);
+    Node::compile(node.unwrap());
     process::exit(0);
 }

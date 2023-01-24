@@ -1,4 +1,6 @@
+use std::collections::LinkedList;
 use std::fmt;
+use std::io::{Error, ErrorKind};
 use std::process;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,6 +12,25 @@ pub enum TokenKind {
     OpenParentheses,
     CloseParentheses,
     Number(u32),
+}
+
+impl TokenKind {
+    fn from_char(c: char) -> Result<Self, Error> {
+        let tk = match c {
+            '+' => TokenKind::Add,
+            '-' => TokenKind::Sub,
+            '*' => TokenKind::Mul,
+            '/' => TokenKind::Div,
+            '(' => TokenKind::OpenParentheses,
+            ')' => TokenKind::CloseParentheses,
+            _ => return Err(Error::new(ErrorKind::InvalidInput, "予期しない文字")),
+        };
+        Ok(tk)
+    }
+
+    fn from_num(n: u32) -> Result<Self, Error> {
+        Ok(TokenKind::Number(n))
+    }
 }
 
 impl fmt::Display for TokenKind {
@@ -31,212 +52,152 @@ pub enum State {
     End,
 }
 
-#[derive(Debug, Clone)]
-pub enum TokenLinkedList<TokenKind> {
-    Empty,
-    NonEmpty {
-        element: TokenKind,
-        next: Box<TokenLinkedList<TokenKind>>,
-    },
+#[derive(Debug)]
+pub struct TokenLinkedList {
+    pub list: LinkedList<TokenKind>,
 }
 
-pub struct TokenLinkedListIterator<'a, TokenKind: 'a> {
-    unvisited: Vec<&'a TokenKind>,
-}
-
-impl<'a, TokenKind: 'a> TokenLinkedListIterator<'a, TokenKind> {
-    fn push_next(&mut self, mut token: &'a TokenLinkedList<TokenKind>) {
-        while let TokenLinkedList::NonEmpty {
-            ref element,
-            ref next,
-        } = *token
-        {
-            self.unvisited.push(element);
-            token = &(**next);
+impl TokenLinkedList {
+    pub fn new() -> Self {
+        TokenLinkedList {
+            list: LinkedList::new(),
         }
     }
-}
 
-impl<TokenKind> TokenLinkedList<TokenKind> {
-    fn iter(&self) -> TokenLinkedListIterator<TokenKind> {
-        let mut iter = TokenLinkedListIterator {
-            unvisited: Vec::new(),
-        };
-        iter.push_next(self);
-        iter
+    pub fn from(s: String) -> Result<Self, std::io::Error> {
+        TokenLinkedList::tokenize(s)
     }
 
-    pub fn next(&self) -> Option<&Self> {
-        let next = match self {
-            TokenLinkedList::Empty => None,
-            TokenLinkedList::NonEmpty { element: _, next } => Some(&**next),
-        };
-        next
-    }
-}
+    pub fn tokenize(s: String) -> Result<Self, std::io::Error> {
+        let mut state = State::Start;
+        let mut nest_count = 0;
+        let mut tll = TokenLinkedList::new();
+        let mut number = String::from("");
 
-impl<'a, TokenKind: 'a> IntoIterator for &'a TokenLinkedList<TokenKind> {
-    type Item = &'a TokenKind;
-    type IntoIter = TokenLinkedListIterator<'a, TokenKind>;
+        for c in s.chars() {
+            number.push(c);
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-impl<'a, TokenKind> Iterator for TokenLinkedListIterator<'a, TokenKind> {
-    type Item = &'a TokenKind;
-
-    fn next(&mut self) -> Option<&'a TokenKind> {
-        self.unvisited.reverse();
-        let next = self.unvisited.pop();
-        self.unvisited.reverse();
-        next
-    }
-}
-
-impl TokenLinkedList<TokenKind> {
-    pub fn new(s: String) -> Self {
-        Self::tokenize(s, State::Start, 0)
-    }
-
-    fn tokenize(s: String, state: State, nest_count: u32) -> Self {
-        if s.len() == 0 {
-            if nest_count != 0 {
-                eprintln!("'('と')'の数が一致しません");
-                process::exit(1);
+            if number.parse::<u32>().is_err() && number.len() == 1 {
+                number = String::from("");
+            } else if number.parse::<u32>().is_err() && number.len() > 1 {
+                tll.list.push_back(TokenKind::Number(
+                    number[0..number.len() - 1].parse::<u32>().unwrap(),
+                ));
+                number = String::from("");
             }
 
-            return TokenLinkedList::Empty;
+            match c {
+                '+' | '-' | '*' | '/' => {
+                    if state != State::S2 {
+                        return Err(Error::new(
+                            ErrorKind::InvalidInput,
+                            format!("{}の位置が不適切です。", c),
+                        ));
+                    }
+                    tll.list.push_back(TokenKind::from_char(c).unwrap());
+                    state = State::S1;
+                }
+                '(' => {
+                    if state != State::S1 && state != State::Start {
+                        return Err(Error::new(ErrorKind::InvalidInput, "(の位置が不適切です。"));
+                    }
+                    tll.list.push_back(TokenKind::OpenParentheses);
+                    state = State::S1;
+                    nest_count += 1;
+                }
+                ')' => {
+                    if state != State::S2 && state != State::End {
+                        return Err(Error::new(ErrorKind::InvalidInput, ")の位置が不適切です。"));
+                    }
+                    tll.list.push_back(TokenKind::CloseParentheses);
+                    state = State::S2;
+                    nest_count -= 1;
+                }
+                '0'..='9' => {
+                    state = State::S2;
+                }
+                ' ' => continue,
+                _ => {
+                    return Err(Error::new(
+                        ErrorKind::InvalidInput,
+                        "パースできない文字です。",
+                    ))
+                }
+            }
+        }
+        if number.parse::<u32>().is_ok() {
+            tll.list
+                .push_back(TokenKind::Number(number[0..].parse::<u32>().unwrap()));
         }
 
-        let (first, last) = s.split_at(1);
-
-        if last.len() == 0 && "+-*/(".contains(first) {
-            eprintln!("式の終端文字が不正です");
-            process::exit(1);
+        if state == State::S1 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "式が演算子で終了しています。",
+            ));
         }
-
-        match first {
-            "(" => {
-                if state != State::S1 && state != State::Start {
-                    eprintln!("'('の位置が不正です");
-                    process::exit(1);
-                }
-                return TokenLinkedList::NonEmpty {
-                    element: TokenKind::OpenParentheses,
-                    next: Box::new(TokenLinkedList::tokenize(
-                        last.to_string(),
-                        State::S1,
-                        nest_count + 1,
-                    )),
-                };
-            }
-            ")" => {
-                if state != State::S2 && state != State::End {
-                    eprintln!("')'の位置が不正です");
-                    process::exit(1);
-                }
-                return TokenLinkedList::NonEmpty {
-                    element: TokenKind::CloseParentheses,
-                    next: Box::new(TokenLinkedList::tokenize(
-                        last.to_string(),
-                        State::S2,
-                        nest_count - 1,
-                    )),
-                };
-            }
-            "+" => {
-                if state != State::S2 {
-                    eprintln!("'+'の位置が不正です");
-                    process::exit(1);
-                }
-                return TokenLinkedList::NonEmpty {
-                    element: TokenKind::Add,
-                    next: Box::new(TokenLinkedList::tokenize(
-                        last.to_string(),
-                        State::S1,
-                        nest_count,
-                    )),
-                };
-            }
-            "-" => {
-                if state != State::S2 {
-                    eprintln!("'-'の位置が不正です");
-                    process::exit(1);
-                }
-                return TokenLinkedList::NonEmpty {
-                    element: TokenKind::Sub,
-                    next: Box::new(TokenLinkedList::tokenize(
-                        last.to_string(),
-                        State::S1,
-                        nest_count,
-                    )),
-                };
-            }
-            "*" => {
-                if state != State::S2 {
-                    eprintln!("'*'の位置が不正です");
-                    process::exit(1);
-                }
-                return TokenLinkedList::NonEmpty {
-                    element: TokenKind::Mul,
-                    next: Box::new(TokenLinkedList::tokenize(
-                        last.to_string(),
-                        State::S1,
-                        nest_count,
-                    )),
-                };
-            }
-            "/" => {
-                if state != State::S2 {
-                    eprintln!("'/'の位置が不正です");
-                    process::exit(1);
-                }
-                return TokenLinkedList::NonEmpty {
-                    element: TokenKind::Div,
-                    next: Box::new(TokenLinkedList::tokenize(
-                        last.to_string(),
-                        State::S1,
-                        nest_count,
-                    )),
-                };
-            }
-            _ => (),
+        if nest_count != 0 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "カッコが対応していません。",
+            ));
         }
-
-        for (i, c) in s.chars().enumerate() {
-            if c.to_string().parse::<u32>().is_ok() && s.len() == i + 1 {
-                return TokenLinkedList::NonEmpty {
-                    element: TokenKind::Number(s.parse::<u32>().unwrap()),
-                    next: Box::new(TokenLinkedList::tokenize(
-                        "".to_string(),
-                        State::S2,
-                        nest_count,
-                    )),
-                };
-            } else if c.to_string().parse::<u32>().is_err() {
-                return TokenLinkedList::NonEmpty {
-                    element: TokenKind::Number(s[0..i].parse::<u32>().unwrap()),
-                    next: Box::new(TokenLinkedList::tokenize(
-                        s[i..].to_string(),
-                        State::S2,
-                        nest_count,
-                    )),
-                };
-            };
-        }
-        return TokenLinkedList::Empty;
+        Ok(tll)
     }
 
     pub fn print_token(&self) {
-        match self {
-            TokenLinkedList::Empty => {
-                println!("  ret");
-            }
-            TokenLinkedList::NonEmpty { ref element, next } => {
-                print!("{}", element);
-                next.print_token();
+        for t in self.list.iter() {
+            print!("{}", t);
+        }
+        println!("  ret");
+    }
+
+    pub fn consume(&mut self, tk: TokenKind) -> bool {
+        if self.list.len() == 0 {
+            return false;
+        }
+        let t = self.list.pop_front();
+        if t == Some(tk) {
+            return true;
+        }
+        self.list.push_front(t.unwrap());
+        false
+    }
+
+    pub fn expect(&mut self, tk: TokenKind) -> Result<(), std::io::Error> {
+        if self.list.len() == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "failed expect.",
+            ));
+        }
+        let t = self.list.pop_front();
+        if t == Some(tk) {
+            return Ok(());
+        }
+        self.list.push_front(t.unwrap());
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "failed expect.",
+        ))
+    }
+
+    pub fn expect_number(&mut self) -> Result<u32, std::io::Error> {
+        if self.list.len() == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "failed expect.",
+            ));
+        }
+        let t = self.list.pop_front();
+        match t {
+            Some(TokenKind::Number(n)) => return Ok(n),
+            _ => {
+                self.list.push_front(t.unwrap());
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "failed expect.",
+                ));
             }
         }
     }
